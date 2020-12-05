@@ -12,6 +12,12 @@ from torch.utils.data import Dataset
 from random import shuffle
 from utils import cuda, load_dataset
 
+from allennlp.data import Instance, Token
+from allennlp.data import Vocabulary as AllenNLPVocabulary
+from allennlp.data.batch import Batch
+from allennlp.data.fields import TextField
+from allennlp.data.token_indexers.elmo_indexer import ELMoTokenCharactersIndexer
+
 
 PAD_TOKEN = '[PAD]'
 UNK_TOKEN = '[UNK]'
@@ -177,6 +183,8 @@ class QADataset(Dataset):
                 samples.append(
                     (qid, passage, question, answer_start, answer_end)
                 )
+                # print(samples[0])
+                # exit()
                 
         return samples
 
@@ -218,6 +226,43 @@ class QADataset(Dataset):
             answer_end_ids = torch.tensor(answer_end)
 
             # Store each part in an independent list.
+            passages.append(passage_ids)
+            questions.append(question_ids)
+            start_positions.append(answer_start_ids)
+            end_positions.append(answer_end_ids)
+
+        return zip(passages, questions, start_positions, end_positions)
+
+    def get_ids(self, sentence):
+        indexer = ELMoTokenCharactersIndexer()
+        instances = []
+        for s in [sentence]:
+            tokens = [Token(token) for token in s]
+            field = TextField(tokens, {"character_ids": indexer})
+            instance = Instance({"elmo": field})
+            instances.append(instance)
+
+        dataset = Batch(instances)
+        vocab = AllenNLPVocabulary()
+        dataset.index_instances(vocab)
+        return dataset.as_tensor_dict()["elmo"]["character_ids"]["elmo_tokens"]
+
+    def _create_elmo_data_generator(self, shuffle_examples=False):
+        example_idxs = list(range(len(self.samples)))
+        if shuffle_examples:
+            shuffle(example_idxs)
+
+        passages = []
+        questions = []
+        start_positions = []
+        end_positions = []
+        for idx in example_idxs:
+            qid, passage, question, answer_start, answer_end = self.samples[idx]
+            passage_ids = self.get_ids(passage).squeeze()
+            question_ids = self.get_ids(question).squeeze()
+            answer_start_ids = torch.tensor(answer_start)
+            answer_end_ids = torch.tensor(answer_end)
+
             passages.append(passage_ids)
             questions.append(question_ids)
             start_positions.append(answer_start_ids)
@@ -275,8 +320,8 @@ class QADataset(Dataset):
 
             # Assume pad token index is 0. Need to change here if pad token
             # index is other than 0.
-            padded_passages = torch.zeros(bsz, max_passage_length)
-            padded_questions = torch.zeros(bsz, max_question_length)
+            padded_passages = torch.zeros(bsz, max_passage_length, 50)
+            padded_questions = torch.zeros(bsz, max_question_length, 50)
             # Pad passages and questions
             for iii, passage_question in enumerate(zip(passages, questions)):
                 passage, question = passage_question
@@ -309,7 +354,7 @@ class QADataset(Dataset):
             A data generator that iterates though all batches.
         """
         return self._create_batches(
-            self._create_data_generator(shuffle_examples=shuffle_examples),
+            self._create_elmo_data_generator(shuffle_examples=shuffle_examples),
             self.batch_size
         )
 

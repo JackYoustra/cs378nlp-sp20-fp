@@ -11,6 +11,13 @@ import torch.nn.functional as F
 from utils import cuda, load_cached_embeddings
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+# from allennlp.data.fields import TextField
+# from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
+# from allennlp.modules.token_embedders import ElmoTokenEmbedder
+from allennlp.modules.elmo import Elmo
+
+options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json'
+weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5'
 
 def _sort_batch_by_length(tensor, sequence_lengths):
     """
@@ -136,6 +143,11 @@ class BilinearOutput(nn.Module):
 
 
 class BaselineReader(nn.Module):
+    # use CNN on characters, finetune through BERT (do it on top of BERT) - won't work b/c can't use pretrained embeddings
+    # figure out spacy - track 1
+    # use CNN after embedding layer, average the embedding layer w/ CNN (input = characters)
+    # input to context2query = linear layer of embedding layer & CNN
+
     """
     Baseline QA Model
     [Architecture]
@@ -171,19 +183,21 @@ class BaselineReader(nn.Module):
         super().__init__()
 
         self.args = args
-        self.pad_token_id = args.pad_token_id
+        # self.pad_token_id = args.pad_token_id
+        self.pad_token_id = 0
 
         # Initialize embedding layer (1)
+        self.elmo = Elmo(options_file, weight_file, 1)
         self.embedding = nn.Embedding(args.vocab_size, args.embedding_dim)
 
         # Initialize Context2Query (2)
-        self.aligned_att = AlignedAttention(args.embedding_dim)
+        self.aligned_att = AlignedAttention(256)
 
         rnn_cell = nn.LSTM if args.rnn_cell_type == 'lstm' else nn.GRU
 
         # Initialize passage encoder (3)
         self.passage_rnn = rnn_cell(
-            args.embedding_dim * 2,
+            512,
             args.hidden_dim,
             bidirectional=args.bidirectional,
             batch_first=True,
@@ -191,7 +205,7 @@ class BaselineReader(nn.Module):
 
         # Initialize question encoder (4)
         self.question_rnn = rnn_cell(
-            args.embedding_dim,
+            256,
             args.hidden_dim,
             bidirectional=args.bidirectional,
             batch_first=True,
@@ -274,15 +288,19 @@ class BaselineReader(nn.Module):
         return unpacked_sequence_tensor.index_select(0, restoration_indices)
 
     def forward(self, batch):
-        # Obtain masks and lengths for passage and question.
-        passage_mask = (batch['passages'] != self.pad_token_id)  # [batch_size, p_len]
-        question_mask = (batch['questions'] != self.pad_token_id)  # [batch_size, q_len]
-        passage_lengths = passage_mask.long().sum(-1)  # [batch_size]
-        question_lengths = question_mask.long().sum(-1)  # [batch_size]
 
         # 1) Embedding Layer: Embed the passage and question.
-        passage_embeddings = self.embedding(batch['passages'])  # [batch_size, p_len, p_dim]
-        question_embeddings = self.embedding(batch['questions'])  # [batch_size, q_len, q_dim]
+        passage_output = self.elmo(batch['passages'])
+        question_output = self.elmo(batch['questions'])
+
+        passage_embeddings = torch.stack(passage_output["elmo_representations"]).squeeze()
+        question_embeddings = torch.stack(question_output["elmo_representations"]).squeeze()
+
+        # Obtain masks and lengths for passage and question.
+        passage_mask = passage_output["mask"].squeeze()
+        question_mask = question_output["mask"].squeeze()
+        passage_lengths = passage_mask.long().sum(-1)  # [batch_size]
+        question_lengths = question_mask.long().sum(-1)  # [batch_size]
 
         # 2) Context2Query: Compute weighted sum of question embeddings for
         #        each passage word and concatenate with passage embeddings.

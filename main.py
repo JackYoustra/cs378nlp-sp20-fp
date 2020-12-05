@@ -36,7 +36,6 @@ from data import QADataset, Tokenizer, Vocabulary
 from model import BaselineReader
 from utils import cuda, search_span_endpoints, unpack
 
-
 _TQDM_BAR_SIZE = 75
 _TQDM_LEAVE = False
 _TQDM_UNIT = ' batches'
@@ -464,15 +463,6 @@ def main(args):
     train_dataset = QADataset(args, args.train_path)
     dev_dataset = QADataset(args, args.dev_path)
 
-    # Create vocabulary and tokenizer.
-    vocabulary = Vocabulary(train_dataset.samples, args.vocab_size)
-    tokenizer = Tokenizer(vocabulary)
-    for dataset in (train_dataset, dev_dataset):
-        dataset.register_tokenizer(tokenizer)
-    args.vocab_size = len(vocabulary)
-    args.pad_token_id = tokenizer.pad_token_id
-    print(f'vocab words = {len(vocabulary)}')
-
     # Print number of samples.
     print(f'train samples = {len(train_dataset)}')
     print(f'dev samples = {len(dev_dataset)}')
@@ -480,15 +470,6 @@ def main(args):
 
     # Select model.
     model = _select_model(args)
-    num_pretrained = model.load_pretrained_embeddings(
-        vocabulary, args.embedding_path
-    )
-    pct_pretrained = round(num_pretrained / len(vocabulary) * 100., 2)
-    print(f'using pre-trained embeddings from \'{args.embedding_path}\'')
-    print(
-        f'initialized {num_pretrained}/{len(vocabulary)} '
-        f'embeddings ({pct_pretrained}%)'
-    )
     print()
 
     if args.use_gpu:
