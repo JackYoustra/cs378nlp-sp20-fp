@@ -192,6 +192,12 @@ parser.add_argument(
     default=0.,
     help='dropout on passage and question vectors',
 )
+parser.add_argument(
+    '--elmo_size',
+    choices=['small', 'medium', 'original'],
+    default='small',
+    help='which elmo model to use'
+)
 
 
 def _print_arguments(args):

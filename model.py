@@ -11,13 +11,16 @@ import torch.nn.functional as F
 from utils import cuda, load_cached_embeddings
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-# from allennlp.data.fields import TextField
-# from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
-# from allennlp.modules.token_embedders import ElmoTokenEmbedder
 from allennlp.modules.elmo import Elmo
 
-options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json'
-weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5'
+small_options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json'
+small_weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5'
+
+med_options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x2048_256_2048cnn_1xhighway/elmo_2x2048_256_2048cnn_1xhighway_options.json'
+med_weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x2048_256_2048cnn_1xhighway/elmo_2x2048_256_2048cnn_1xhighway_weights.hdf5'
+
+orig_options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json'
+orig_weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5'
 
 def _sort_batch_by_length(tensor, sequence_lengths):
     """
@@ -187,17 +190,19 @@ class BaselineReader(nn.Module):
         self.pad_token_id = 0
 
         # Initialize embedding layer (1)
-        self.elmo = Elmo(options_file, weight_file, 1)
-        self.embedding = nn.Embedding(args.vocab_size, args.embedding_dim)
+        weights = med_weight_file if args.elmo_size == 'medium' else orig_weight_file if args.elmo_size == 'original' else small_weight_file
+        options = med_options_file if args.elmo_size == 'medium' else orig_options_file if args.elmo_size == 'original' else small_options_file
+        self.elmo = Elmo(options, weights, 1)
+        embedding_dim = 512 if args.elmo_size == 'medium' else 1024 if args.elmo_size == 'original' else 256
 
         # Initialize Context2Query (2)
-        self.aligned_att = AlignedAttention(256)
+        self.aligned_att = AlignedAttention(embedding_dim)
 
         rnn_cell = nn.LSTM if args.rnn_cell_type == 'lstm' else nn.GRU
 
         # Initialize passage encoder (3)
         self.passage_rnn = rnn_cell(
-            512,
+            embedding_dim * 2,
             args.hidden_dim,
             bidirectional=args.bidirectional,
             batch_first=True,
@@ -205,7 +210,7 @@ class BaselineReader(nn.Module):
 
         # Initialize question encoder (4)
         self.question_rnn = rnn_cell(
-            256,
+            embedding_dim,
             args.hidden_dim,
             bidirectional=args.bidirectional,
             batch_first=True,
@@ -227,34 +232,6 @@ class BaselineReader(nn.Module):
 
         # Initialize bilinear layer for end positions (7)
         self.end_output = BilinearOutput(_hidden_dim, _hidden_dim)
-
-    def load_pretrained_embeddings(self, vocabulary, path):
-        """
-        Loads GloVe vectors and initializes the embedding matrix.
-
-        Args:
-            vocabulary: `Vocabulary` object.
-            path: Embedding path, e.g. "glove/glove.6B.300d.txt".
-        """
-        embedding_map = load_cached_embeddings(path)
-
-        # Create embedding matrix. By default, embeddings are randomly
-        # initialized from Uniform(-0.1, 0.1).
-        embeddings = torch.zeros(
-            (len(vocabulary), self.args.embedding_dim)
-        ).uniform_(-0.1, 0.1)
-
-        # Initialize pre-trained embeddings.
-        num_pretrained = 0
-        for (i, word) in enumerate(vocabulary.words):
-            if word in embedding_map:
-                embeddings[i] = torch.tensor(embedding_map[word])
-                num_pretrained += 1
-
-        # Place embedding matrix on GPU.
-        self.embedding.weight.data = cuda(self.args, embeddings)
-
-        return num_pretrained
 
     def sorted_rnn(self, sequences, sequence_lengths, rnn):
         """
