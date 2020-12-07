@@ -148,6 +148,8 @@ class QADataset(Dataset):
         self.batch_size = args.batch_size if 'batch_size' in args else 1
         self.pad_token_id = self.tokenizer.pad_token_id \
             if self.tokenizer is not None else 0
+        self.biggest_passage = 0
+        self.biggest_question = 0
 
     def _create_samples(self):
         """
@@ -240,10 +242,12 @@ class QADataset(Dataset):
         questions = []
         start_positions = []
         end_positions = []
-        for idx in example_idxs:
+        for idx in example_idxs[:100]:
             qid, passage, question, answer_start, answer_end = self.samples[idx]
-            passage_ids = tokenizer(passage, padding=True, truncation=True, return_tensors="pt") #.squeeze()  # self.get_ids(passage).squeeze()
-            question_ids = tokenizer(question, padding=True, truncation=True, return_tensors="pt") #.squeeze()  # self.get_ids(question).squeeze()
+            innerpassage = tokenizer.encode(''.join(passage))
+            passage_ids = torch.Tensor([innerpassage]) #.squeeze()  # self.get_ids(passage).squeeze()
+            innerquestion = tokenizer.encode(''.join(question))
+            question_ids = torch.Tensor([innerquestion]) #.squeeze()  # self.get_ids(question).squeeze()
             answer_start_ids = torch.tensor(answer_start)
             answer_end_ids = torch.tensor(answer_end)
 
@@ -251,6 +255,8 @@ class QADataset(Dataset):
             questions.append(question_ids)
             start_positions.append(answer_start_ids)
             end_positions.append(answer_end_ids)
+            self.biggest_passage = max(self.biggest_passage, len(innerpassage))
+            self.biggest_question = max(self.biggest_question, len(innerquestion))
 
         return zip(passages, questions, start_positions, end_positions)
 
@@ -304,8 +310,8 @@ class QADataset(Dataset):
 
             # Assume pad token index is 0. Need to change here if pad token
             # index is other than 0.
-            padded_passages = torch.zeros(bsz, max_passage_length, 50)
-            padded_questions = torch.zeros(bsz, max_question_length, 50)
+            padded_passages = torch.zeros(bsz, max_passage_length, self.biggest_passage)
+            padded_questions = torch.zeros(bsz, max_question_length, self.biggest_question)
             # Pad passages and questions
             for iii, passage_question in enumerate(zip(passages, questions)):
                 passage, question = passage_question
