@@ -10,13 +10,10 @@ import torch
 
 from torch.utils.data import Dataset
 from random import shuffle
-from utils import cuda, load_dataset
 
-from allennlp.data import Instance, Token
-from allennlp.data import Vocabulary as AllenNLPVocabulary
-from allennlp.data.batch import Batch
-from allennlp.data.fields import TextField
-from allennlp.data.token_indexers.elmo_indexer import ELMoTokenCharactersIndexer
+from transformers import BertTokenizer
+
+from utils import cuda, load_dataset
 
 
 PAD_TOKEN = '[PAD]'
@@ -233,21 +230,8 @@ class QADataset(Dataset):
 
         return zip(passages, questions, start_positions, end_positions)
 
-    def get_ids(self, sentence):
-        indexer = ELMoTokenCharactersIndexer()
-        instances = []
-        for s in [sentence]:
-            tokens = [Token(token) for token in s]
-            field = TextField(tokens, {"character_ids": indexer})
-            instance = Instance({"elmo": field})
-            instances.append(instance)
-
-        dataset = Batch(instances)
-        vocab = AllenNLPVocabulary()
-        dataset.index_instances(vocab)
-        return dataset.as_tensor_dict()["elmo"]["character_ids"]["elmo_tokens"]
-
     def _create_elmo_data_generator(self, shuffle_examples=False):
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         example_idxs = list(range(len(self.samples)))
         if shuffle_examples:
             shuffle(example_idxs)
@@ -258,8 +242,8 @@ class QADataset(Dataset):
         end_positions = []
         for idx in example_idxs:
             qid, passage, question, answer_start, answer_end = self.samples[idx]
-            passage_ids = self.get_ids(passage).squeeze()
-            question_ids = self.get_ids(question).squeeze()
+            passage_ids = tokenizer(passage, padding=True, truncation=True, return_tensors="pt") #.squeeze()  # self.get_ids(passage).squeeze()
+            question_ids = tokenizer(question, padding=True, truncation=True, return_tensors="pt") #.squeeze()  # self.get_ids(question).squeeze()
             answer_start_ids = torch.tensor(answer_start)
             answer_end_ids = torch.tensor(answer_end)
 

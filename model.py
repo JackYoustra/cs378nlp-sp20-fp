@@ -7,20 +7,10 @@ Author:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers import BertModel
 
 from utils import cuda, load_cached_embeddings
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-from allennlp.modules.elmo import Elmo
-
-small_options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json'
-small_weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5'
-
-med_options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x2048_256_2048cnn_1xhighway/elmo_2x2048_256_2048cnn_1xhighway_options.json'
-med_weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x2048_256_2048cnn_1xhighway/elmo_2x2048_256_2048cnn_1xhighway_weights.hdf5'
-
-orig_options_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json'
-orig_weight_file = 'https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5'
 
 def _sort_batch_by_length(tensor, sequence_lengths):
     """
@@ -190,10 +180,8 @@ class BaselineReader(nn.Module):
         self.pad_token_id = 0
 
         # Initialize embedding layer (1)
-        weights = med_weight_file if args.elmo_size == 'medium' else orig_weight_file if args.elmo_size == 'original' else small_weight_file
-        options = med_options_file if args.elmo_size == 'medium' else orig_options_file if args.elmo_size == 'original' else small_options_file
-        self.elmo = Elmo(options, weights, 1)
-        embedding_dim = 512 if args.elmo_size == 'medium' else 1024 if args.elmo_size == 'original' else 256
+        self.bert = BertModel.from_pretrained('bert-base-uncased')
+        embedding_dim = 512
 
         # Initialize Context2Query (2)
         self.aligned_att = AlignedAttention(embedding_dim)
@@ -267,8 +255,8 @@ class BaselineReader(nn.Module):
     def forward(self, batch):
 
         # 1) Embedding Layer: Embed the passage and question.
-        passage_output = self.elmo(batch['passages'])
-        question_output = self.elmo(batch['questions'])
+        passage_output = self.bert(batch['passages'])
+        question_output = self.bert(batch['questions'])
 
         passage_embeddings = torch.stack(passage_output["elmo_representations"]).squeeze()
         question_embeddings = torch.stack(question_output["elmo_representations"]).squeeze()
