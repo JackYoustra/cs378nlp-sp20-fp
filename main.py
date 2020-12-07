@@ -30,6 +30,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
+from transformers import BertForQuestionAnswering, BertTokenizer
 
 from data import QADataset, Tokenizer, Vocabulary
 
@@ -58,7 +59,7 @@ parser.add_argument(
     '--model',
     type=str,
     required=True,
-    choices=['baseline'],
+    choices=['baseline', 'bert'],
     help='which model to use',
 )
 parser.add_argument(
@@ -220,6 +221,8 @@ def _select_model(args):
     """
     if args.model == 'baseline':
         return BaselineReader(args)
+    elif args.model == 'bert':
+        return BertForQuestionAnswering.from_pretrained('bert-base-uncased')
     else:
         raise RuntimeError(f'model \'{args.model}\' not recognized!')
 
@@ -466,7 +469,10 @@ def main(args):
 
     # Create vocabulary and tokenizer.
     vocabulary = Vocabulary(train_dataset.samples, args.vocab_size)
-    tokenizer = Tokenizer(vocabulary)
+    if args.model == "bert":
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    else:
+        tokenizer = Tokenizer(vocabulary)
     for dataset in (train_dataset, dev_dataset):
         dataset.register_tokenizer(tokenizer)
     args.vocab_size = len(vocabulary)
@@ -480,24 +486,25 @@ def main(args):
 
     # Select model.
     model = _select_model(args)
-    num_pretrained = model.load_pretrained_embeddings(
-        vocabulary, args.embedding_path
-    )
-    pct_pretrained = round(num_pretrained / len(vocabulary) * 100., 2)
-    print(f'using pre-trained embeddings from \'{args.embedding_path}\'')
-    print(
-        f'initialized {num_pretrained}/{len(vocabulary)} '
-        f'embeddings ({pct_pretrained}%)'
-    )
-    print()
+    if args.model != "bert":
+        num_pretrained = model.load_pretrained_embeddings(
+            vocabulary, args.embedding_path
+        )
+        pct_pretrained = round(num_pretrained / len(vocabulary) * 100., 2)
+        print(f'using pre-trained embeddings from \'{args.embedding_path}\'')
+        print(
+            f'initialized {num_pretrained}/{len(vocabulary)} '
+            f'embeddings ({pct_pretrained}%)'
+        )
+        print()
 
-    if args.use_gpu:
-        model = cuda(args, model)
+        if args.use_gpu:
+            model = cuda(args, model)
 
-    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'using model \'{args.model}\' ({params} params)')
-    print(model)
-    print()
+        params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f'using model \'{args.model}\' ({params} params)')
+        print(model)
+        print()
 
     if args.do_train:
         # Track training statistics for checkpointing.
