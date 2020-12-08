@@ -133,6 +133,8 @@ def read_answers(gold_file):
         True dict mapping question id (id) to answer span(s).
     """
     answers = {}
+    contexts = {}
+    questions = {}
     with gzip.open(gold_file, 'rb') as f:
         for i, line in enumerate(f):
             example = json.loads(line)
@@ -140,7 +142,9 @@ def read_answers(gold_file):
                 continue
             for qa in example['qas']:
                 answers[qa['qid']] = qa['answers']
-    return answers
+                contexts[qa['qid']] = example['context']
+                questions[qa['qid']] = qa['question']
+    return answers, contexts, questions
 
 
 def evaluate(answers, predictions, skip_no_answer=False):
@@ -179,11 +183,23 @@ def evaluate(answers, predictions, skip_no_answer=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, help='path to evaluation dataset')
-    parser.add_argument('--output_path', type=str, help='path to output predictions')
+    parser.add_argument('--output_path', type=str, nargs='+', help='path to output predictions')
     parser.add_argument('--skip_no_answer', action='store_true')
     args = parser.parse_args()
 
-    answers = read_answers(args.dataset_path)
-    predictions = read_predictions(args.output_path)
-    metrics = evaluate(answers, predictions, args.skip_no_answer)
-    print(metrics)
+    answers, contexts, questions = read_answers(args.dataset_path)
+    predictions = [set(read_predictions(x).items()) for x in args.output_path]
+    dictionary_predictions = [read_predictions(x) for x in args.output_path]
+
+    assert(len(predictions[0]) == len(predictions[1]))
+    first_differenced = [x for x in predictions[0] if x not in predictions[1]]
+    second_differenced = [x for x in predictions[1] if x not in predictions[0]]
+
+    print("Out of {} predictions, {} differ from first and {} from second".format(len(predictions[0]) * 2, len(first_differenced), len(second_differenced)))
+
+    for qid, answer in first_differenced:
+        print("CONTEXT: {}\n--------\nQUESTION: {} \n-------\n1) {}\n2) {}\n-------\nCORRECT: {}\n".format(contexts[qid], questions[qid], answer, dictionary_predictions[1][qid], answers[qid]))
+
+    for prediction in dictionary_predictions:
+        metrics = evaluate(answers, prediction, args.skip_no_answer)
+        print(metrics)
